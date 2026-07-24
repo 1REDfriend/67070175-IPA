@@ -1,0 +1,13 @@
+# Claude Code / assistant artifacts
+*.claude*
+.claude/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# OS
+.DS_Store
+Thumbs.db
