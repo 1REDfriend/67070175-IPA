@@ -1,0 +1,56 @@
+{# Render IOS config for one device from structured vars (see netmiko-jinja2.py) #}
+{% if vlans %}
+{% for vlan in vlans %}
+vlan {{ vlan.id }}
+{% if vlan.name %}
+ name {{ vlan.name }}
+{% endif %}
+{% endfor %}
+{% for port in access_ports %}
+interface {{ port.intf }}
+{% if port.trunk_encap %}
+ switchport trunk encapsulation dot1q
+{% endif %}
+ switchport mode access
+ switchport access vlan {{ port.vlan }}
+{% endfor %}
+{% endif %}
+{% if ospf %}
+router ospf {{ ospf.process }}{% if ospf.vrf %} vrf {{ ospf.vrf }}{% endif %}
+
+{% for net in ospf.networks %}
+ network {{ net.net }} {{ net.wild }} area {{ net.area }}
+{% endfor %}
+{% for p in ospf.passive %}
+ passive-interface {{ p }}
+{% endfor %}
+{% if ospf.default_originate %}
+ default-information originate
+{% endif %}
+{% endif %}
+{% if nat %}
+ip access-list standard {{ nat.acl_name }}
+{% for p in nat.acl_permit %}
+ permit {{ p.net }} {{ p.wild }}
+{% endfor %}
+{% for i in nat.outside %}
+interface {{ i }}
+ ip nat outside
+{% endfor %}
+{% for i in nat.inside %}
+interface {{ i }}
+ ip nat inside
+{% endfor %}
+ip nat inside source list {{ nat.acl_name }} interface {{ nat.overload_intf }}{% if nat.vrf %} vrf {{ nat.vrf }}{% endif %} overload
+
+{% endif %}
+{% if vty_acl %}
+ip access-list standard {{ vty_acl.name }}
+{% for p in vty_acl.permit %}
+ permit {{ p.net }} {{ p.wild }}
+{% endfor %}
+line vty 0 4
+ access-class {{ vty_acl.name }} in
+line vty 5 15
+ access-class {{ vty_acl.name }} in
+{% endif %}
