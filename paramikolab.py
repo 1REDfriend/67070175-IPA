@@ -30,13 +30,19 @@ KEY_PATH = os.path.expanduser("~/.ssh/id_rsa_ipa")
 REPO_DIR = Path(__file__).resolve().parent
 CONFIG_DIR = REPO_DIR / "config"
 
-# name -> SSH management IP reachable from this PC
+# The four inner devices sit on the 172.31.36.0/24 management VLAN behind R0,
+# which the GNS3 host NATs -- so they are NOT directly reachable from this PC.
+# R0 (reachable at 192.168.1.186) port-forwards SSH to each of them:
+#     ip nat inside source static tcp <dev-ip> 22 interface Gig0/0 <port>
+# So every session targets R0's LAN IP on a per-device port; R0 NATs it to the
+# real device. Public-key auth is end-to-end and unaffected by the NAT hop.
+R0_IP = "192.168.1.186"
 DEVICES = [
-    {"name": "R0", "host": "192.168.1.186"},   # edge router, on the LAN
-    {"name": "R1", "host": "172.31.36.4"},      # mgmt VLAN behind R0
-    {"name": "R2", "host": "172.31.36.5"},
-    {"name": "S0", "host": "172.31.36.2"},
-    {"name": "S1", "host": "172.31.36.3"},
+    {"name": "R0", "host": R0_IP, "port": 22,   "mgmt": "192.168.1.186"},
+    {"name": "R1", "host": R0_IP, "port": 2204, "mgmt": "172.31.36.4"},
+    {"name": "R2", "host": R0_IP, "port": 2205, "mgmt": "172.31.36.5"},
+    {"name": "S0", "host": R0_IP, "port": 2202, "mgmt": "172.31.36.2"},
+    {"name": "S1", "host": R0_IP, "port": 2203, "mgmt": "172.31.36.3"},
 ]
 
 # IOSv / IOSvL2 sign only with ssh-rsa (SHA-1). Disable the rsa-sha2 variants
@@ -44,13 +50,14 @@ DEVICES = [
 LEGACY_ALGOS = {"pubkeys": ["rsa-sha2-512", "rsa-sha2-256"]}
 
 
-def connect(host):
+def connect(host, port=22):
     """Open an SSH session using public-key auth only (no password)."""
     key = paramiko.RSAKey.from_private_key_file(KEY_PATH)
     client = paramiko.SSHClient()
     client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
     client.connect(
         hostname=host,
+        port=port,
         username=USERNAME,
         pkey=key,
         look_for_keys=False,
@@ -104,29 +111,30 @@ def clean_running_config(raw):
 
 def main():
     all_ok = True
-    r0_host = None
+    r0 = None
 
     print("== Public-key SSH login test (no password) ==")
     for dev in DEVICES:
+        target = f"{dev['host']}:{dev['port']}"
         try:
-            client = connect(dev["host"])
+            client = connect(dev["host"], dev["port"])
             out = run_command(client, "show running-config | include hostname")
             hostname = next(
                 (l.strip() for l in out.splitlines() if l.strip().startswith("hostname")),
                 "hostname ?",
             )
             client.close()
-            print(f"  [OK]   {dev['name']:<3} {dev['host']:<15} -> {hostname}")
+            print(f"  [OK]   {dev['name']:<3} {dev['mgmt']:<15} (via {target:<20}) -> {hostname}")
             if dev["name"] == "R0":
-                r0_host = dev["host"]
+                r0 = dev
         except Exception as exc:  # noqa: BLE001 - report every device, keep going
             all_ok = False
-            print(f"  [FAIL] {dev['name']:<3} {dev['host']:<15} -> {type(exc).__name__}: {exc}")
+            print(f"  [FAIL] {dev['name']:<3} {dev['mgmt']:<15} (via {target:<20}) -> {type(exc).__name__}: {exc}")
 
     print("\n== Save R0 running-config into the repo ==")
-    if r0_host is not None:
+    if r0 is not None:
         # IOSv allows one channel per SSH session, so use a fresh connection.
-        client = connect(r0_host)
+        client = connect(r0["host"], r0["port"])
         raw = run_command(client, "show running-config")
         client.close()
         CONFIG_DIR.mkdir(exist_ok=True)
