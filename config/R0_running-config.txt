@@ -108,6 +108,7 @@ ip ssh version 2
 ip ssh pubkey-chain
   username admin
    key-hash ssh-rsa BCC28E5E4F3E3C86738E2E13E93EF228 
+ip ssh server algorithm authentication publickey
 !
 ipv6 ioam timestamp
 !
